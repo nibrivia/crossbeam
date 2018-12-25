@@ -6,7 +6,7 @@ set -ex
 export RUSTFLAGS="-D warnings"
 
 cargo check --bins --examples --tests
-cargo test -- --test-threads=1
+cargo test
 
 if [[ "$TRAVIS_RUST_VERSION" == "nightly" ]]; then
     cd benchmarks
