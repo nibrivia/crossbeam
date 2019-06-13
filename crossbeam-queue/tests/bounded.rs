@@ -4,13 +4,13 @@ extern crate rand;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crossbeam_queue::ArrayQueue;
+use crossbeam_queue::bounded::Queue;
 use crossbeam_utils::thread::scope;
 use rand::{thread_rng, Rng};
 
 #[test]
 fn smoke() {
-    let q = ArrayQueue::new(1);
+    let q = Queue::new(1);
 
     q.push(7).unwrap();
     assert_eq!(q.pop(), Ok(7));
@@ -23,7 +23,7 @@ fn smoke() {
 #[test]
 fn capacity() {
     for i in 1..10 {
-        let q = ArrayQueue::<i32>::new(i);
+        let q = Queue::<i32>::new(i);
         assert_eq!(q.capacity(), i);
     }
 }
@@ -31,12 +31,12 @@ fn capacity() {
 #[test]
 #[should_panic(expected = "capacity must be non-zero")]
 fn zero_capacity() {
-    let _ = ArrayQueue::<i32>::new(0);
+    let _ = Queue::<i32>::new(0);
 }
 
 #[test]
 fn len_empty_full() {
-    let q = ArrayQueue::new(2);
+    let q = Queue::new(2);
 
     assert_eq!(q.len(), 0);
     assert_eq!(q.is_empty(), true);
@@ -66,7 +66,7 @@ fn len() {
     const COUNT: usize = 25_000;
     const CAP: usize = 1000;
 
-    let q = ArrayQueue::new(CAP);
+    let q = Queue::new(CAP);
     assert_eq!(q.len(), 0);
 
     for _ in 0..CAP / 10 {
@@ -122,7 +122,7 @@ fn len() {
 fn spsc() {
     const COUNT: usize = 100_000;
 
-    let q = ArrayQueue::new(3);
+    let q = Queue::new(3);
 
     scope(|scope| {
         scope.spawn(|_| {
@@ -151,7 +151,7 @@ fn mpmc() {
     const COUNT: usize = 25_000;
     const THREADS: usize = 4;
 
-    let q = ArrayQueue::<usize>::new(3);
+    let q = Queue::<usize>::new(3);
     let v = (0..COUNT).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
 
     scope(|scope| {
@@ -204,7 +204,7 @@ fn drops() {
         let additional = rng.gen_range(0, 50);
 
         DROPS.store(0, Ordering::SeqCst);
-        let q = ArrayQueue::new(50);
+        let q = Queue::new(50);
 
         scope(|scope| {
             scope.spawn(|_| {
@@ -238,7 +238,7 @@ fn linearizable() {
     const COUNT: usize = 25_000;
     const THREADS: usize = 4;
 
-    let q = ArrayQueue::new(THREADS);
+    let q = Queue::new(THREADS);
 
     scope(|scope| {
         for _ in 0..THREADS {

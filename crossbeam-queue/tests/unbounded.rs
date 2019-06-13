@@ -4,13 +4,13 @@ extern crate rand;
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crossbeam_queue::SegQueue;
+use crossbeam_queue::unbounded::Queue;
 use crossbeam_utils::thread::scope;
 use rand::{thread_rng, Rng};
 
 #[test]
 fn smoke() {
-    let q = SegQueue::new();
+    let q = Queue::new();
     q.push(7);
     assert_eq!(q.pop(), Ok(7));
 
@@ -21,7 +21,7 @@ fn smoke() {
 
 #[test]
 fn len_empty_full() {
-    let q = SegQueue::new();
+    let q = Queue::new();
 
     assert_eq!(q.len(), 0);
     assert_eq!(q.is_empty(), true);
@@ -39,7 +39,7 @@ fn len_empty_full() {
 
 #[test]
 fn len() {
-    let q = SegQueue::new();
+    let q = Queue::new();
 
     assert_eq!(q.len(), 0);
 
@@ -60,7 +60,7 @@ fn len() {
 fn spsc() {
     const COUNT: usize = 100_000;
 
-    let q = SegQueue::new();
+    let q = Queue::new();
 
     scope(|scope| {
         scope.spawn(|_| {
@@ -88,7 +88,7 @@ fn mpmc() {
     const COUNT: usize = 25_000;
     const THREADS: usize = 4;
 
-    let q = SegQueue::<usize>::new();
+    let q = Queue::<usize>::new();
     let v = (0..COUNT).map(|_| AtomicUsize::new(0)).collect::<Vec<_>>();
 
     scope(|scope| {
@@ -139,7 +139,7 @@ fn drops() {
         let additional = rng.gen_range(0, 1000);
 
         DROPS.store(0, Ordering::SeqCst);
-        let q = SegQueue::new();
+        let q = Queue::new();
 
         scope(|scope| {
             scope.spawn(|_| {

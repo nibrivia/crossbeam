@@ -13,10 +13,5 @@
 
 extern crate crossbeam_utils;
 
-mod array_queue;
-mod err;
-mod seg_queue;
-
-pub use self::array_queue::ArrayQueue;
-pub use self::err::{PopError, PushError};
-pub use self::seg_queue::SegQueue;
+pub mod bounded;
+pub mod unbounded;

@@ -240,7 +240,7 @@ impl<T> Channel<T> {
 
             let new_tail = tail + (1 << SHIFT);
 
-            // Try advancing the tail forward.
+            // Try moving the tail index forward.
             match self.tail.index.compare_exchange_weak(
                 tail,
                 new_tail,
@@ -310,7 +310,7 @@ impl<T> Channel<T> {
 
             if new_head & MARK_BIT == 0 {
                 atomic::fence(Ordering::SeqCst);
-                let tail = self.tail.index.load(Ordering::Relaxed);
+                let tail = self.tail.index.load(Ordering::Acquire);
 
                 // If the tail equals the head, that means the channel is empty.
                 if head >> SHIFT == tail >> SHIFT {

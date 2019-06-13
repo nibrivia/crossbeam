@@ -1294,7 +1294,7 @@ impl<T> Injector<T> {
 
             let new_tail = tail + (1 << SHIFT);
 
-            // Try advancing the tail forward.
+            // Try moving the tail index forward.
             match self.tail.index.compare_exchange_weak(
                 tail,
                 new_tail,
@@ -1368,7 +1368,7 @@ impl<T> Injector<T> {
 
         if new_head & HAS_NEXT == 0 {
             atomic::fence(Ordering::SeqCst);
-            let tail = self.tail.index.load(Ordering::Relaxed);
+            let tail = self.tail.index.load(Ordering::Acquire);
 
             // If the tail equals the head, that means the queue is empty.
             if head >> SHIFT == tail >> SHIFT {
@@ -1469,7 +1469,7 @@ impl<T> Injector<T> {
 
         if new_head & HAS_NEXT == 0 {
             atomic::fence(Ordering::SeqCst);
-            let tail = self.tail.index.load(Ordering::Relaxed);
+            let tail = self.tail.index.load(Ordering::Acquire);
 
             // If the tail equals the head, that means the queue is empty.
             if head >> SHIFT == tail >> SHIFT {
@@ -1630,7 +1630,7 @@ impl<T> Injector<T> {
 
         if new_head & HAS_NEXT == 0 {
             atomic::fence(Ordering::SeqCst);
-            let tail = self.tail.index.load(Ordering::Relaxed);
+            let tail = self.tail.index.load(Ordering::Acquire);
 
             // If the tail equals the head, that means the queue is empty.
             if head >> SHIFT == tail >> SHIFT {
