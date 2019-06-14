@@ -232,7 +232,7 @@ impl<T> Channel<T> {
             drop(inner);
 
             // Block the current thread.
-            let sel = cx.wait_until(deadline);
+            let sel = cx.wait_until(deadline, true);
 
             match sel {
                 Selected::Waiting => unreachable!(),
@@ -301,7 +301,7 @@ impl<T> Channel<T> {
             drop(inner);
 
             // Block the current thread.
-            let sel = cx.wait_until(deadline);
+            let sel = cx.wait_until(deadline, true);
 
             match sel {
                 Selected::Waiting => unreachable!(),

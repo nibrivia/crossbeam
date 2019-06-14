@@ -254,7 +254,7 @@ fn run_select(
                 }
 
                 // Block the current thread.
-                sel = cx.wait_until(deadline);
+                sel = cx.wait_until(deadline, true);
             }
 
             // Unregister all registered operations.
@@ -405,7 +405,7 @@ fn run_ready(handles: &mut [(&SelectHandle, usize, *const u8)], timeout: Timeout
                 }
 
                 // Block the current thread.
-                sel = cx.wait_until(deadline);
+                sel = cx.wait_until(deadline, true);
             }
 
             // Unwatch all operations.

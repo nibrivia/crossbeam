@@ -465,7 +465,7 @@ impl<T> Channel<T> {
                 }
 
                 // Block the current thread.
-                let sel = cx.wait_until(deadline);
+                let sel = cx.wait_until(deadline, false);
 
                 match sel {
                     Selected::Waiting => unreachable!(),
