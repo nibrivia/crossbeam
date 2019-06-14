@@ -2,8 +2,8 @@ use core::cell::Cell;
 use core::fmt;
 use core::sync::atomic;
 
-const SPIN_LIMIT: u32 = 6;
-const YIELD_LIMIT: u32 = 10;
+const SPIN_LIMIT: u32 = 3;
+const YIELD_LIMIT: u32 = 5;
 
 /// Performs exponential backoff in spin loops.
 ///
@@ -144,7 +144,7 @@ impl Backoff {
     /// ```
     #[inline]
     pub fn spin(&self) {
-        for _ in 0..1 << self.step.get().min(SPIN_LIMIT) {
+        for _ in 0..1 << self.step.get() {
             atomic::spin_loop_hint();
         }
 
