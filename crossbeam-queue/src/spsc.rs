@@ -23,7 +23,7 @@ use std::mem;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use crossbeam_utils::CachePadded;
+use crossbeam_utils::{CachePadded, Backoff};
 
 use err::{PopError, PushError};
 
@@ -302,10 +302,12 @@ impl<T> Consumer<T> {
         let mut tail = self.tail.get();
 
         // Check if the queue is *possibly* empty, wait until it's not
+        let backoff = Backoff::new();
         while head == tail {
             // We need to refresh the tail and check again if the queue is *really* empty.
             tail = self.inner.tail.load(Ordering::Acquire);
             self.tail.set(tail);
+            backoff.snooze();
         }
 
         // Read the value from the head slot.
