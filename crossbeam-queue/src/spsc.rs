@@ -297,17 +297,20 @@ impl<T> Consumer<T> {
     /// assert_eq!(c.pop(), Ok(10));
     /// assert_eq!(c.pop(), Err(PopError));
     /// ```
-    pub fn pop(&self) -> Result<T, PopError> {
+    pub fn try_pop(&self) -> Result<T, PopError> {
         let mut head = self.head.get();
         let mut tail = self.tail.get();
 
         // Check if the queue is *possibly* empty, wait until it's not
-        let backoff = Backoff::new();
         while head == tail {
             // We need to refresh the tail and check again if the queue is *really* empty.
             tail = self.inner.tail.load(Ordering::Acquire);
             self.tail.set(tail);
-            backoff.snooze();
+
+            // Is the queue *really* empty?
+            if head == tail {
+                return Err(PopError);
+            }
         }
 
         // Read the value from the head slot.
@@ -319,6 +322,30 @@ impl<T> Consumer<T> {
         self.head.set(head);
 
         Ok(value)
+    }
+
+    pub fn pop(&self) -> T {
+        let mut head = self.head.get();
+        let mut tail = self.tail.get();
+
+        // Check if the queue is *possibly* empty, wait until it's not
+        let backoff = Backoff::new();
+        while head == tail {
+            // We need to refresh the tail and check again if the queue is *really* empty.
+            tail = self.inner.tail.load(Ordering::Acquire);
+            //backoff.spin();
+        }
+        self.tail.set(tail); // TODO move out of loop?
+
+        // Read the value from the head slot.
+        let value = unsafe { self.inner.slot(head).read() };
+
+        // Move the head one slot forward.
+        head = self.inner.increment(head);
+        self.inner.head.store(head, Ordering::Release);
+        self.head.set(head);
+
+        value
     }
 
     /// Returns the capacity of the queue.
