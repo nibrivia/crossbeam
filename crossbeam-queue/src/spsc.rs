@@ -301,16 +301,11 @@ impl<T> Consumer<T> {
         let mut head = self.head.get();
         let mut tail = self.tail.get();
 
-        // Check if the queue is *possibly* empty.
-        if head == tail {
+        // Check if the queue is *possibly* empty, wait until it's not
+        while head == tail {
             // We need to refresh the tail and check again if the queue is *really* empty.
             tail = self.inner.tail.load(Ordering::Acquire);
             self.tail.set(tail);
-
-            // Is the queue *really* empty?
-            if head == tail {
-                return Err(PopError);
-            }
         }
 
         // Read the value from the head slot.
