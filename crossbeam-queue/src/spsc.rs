@@ -436,6 +436,14 @@ impl<T> Consumer<T> {
         self.len() == self.inner.cap
     }
 
+    pub fn wait(&self) {
+        let head = self.head.get();
+        let mut tail = self.inner.tail.load(Ordering::Acquire);
+        while head == tail {
+            tail = self.inner.tail.load(Ordering::Acquire);
+        }
+    }
+
     /// Returns the number of elements in the queue.
     ///
     /// # Examples
