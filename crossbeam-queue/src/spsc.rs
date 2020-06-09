@@ -442,6 +442,7 @@ impl<T> Consumer<T> {
         while head == tail {
             tail = self.inner.tail.load(Ordering::Acquire);
         }
+        self.tail.set(tail);
     }
 
     /// Returns the number of elements in the queue.
