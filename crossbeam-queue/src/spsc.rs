@@ -366,6 +366,9 @@ impl<T> Consumer<T> {
 
         // Check if the queue is *possibly* empty.
         if head == tail {
+            return Err(PopError);
+        }
+        /*
             // We need to refresh the tail and check again if the queue is *really* empty.
             tail = self.inner.tail.load(Ordering::Acquire);
             self.tail.set(tail);
@@ -375,6 +378,7 @@ impl<T> Consumer<T> {
                 return Err(PopError);
             }
         }
+        */
 
         // Read the value from the head slot.
         let value = unsafe { self.inner.slot(head).read() };
