@@ -32,12 +32,9 @@ cfg_if! {
 
 extern crate crossbeam_utils;
 
-#[cfg_attr(feature = "nightly", cfg(target_has_atomic = "ptr"))]
-cfg_if! {
-    if #[cfg(any(feature = "alloc", feature = "std"))] {
-        mod array_queue;
-        mod err;
-        mod seg_queue;
+mod array_queue;
+mod err;
+mod seg_queue;
 
 pub use self::array_queue::ArrayQueue;
 pub use self::err::{PopError, PushError};
