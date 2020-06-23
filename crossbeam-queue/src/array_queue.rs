@@ -270,7 +270,7 @@ impl<T> ArrayQueue<T> {
                         let msg = unsafe { slot.value.get().read().assume_init() };
                         slot.stamp
                             .store(head.wrapping_add(self.one_lap), Ordering::Release);
-                        return Ok(value);
+                        return Ok(msg);
                     }
                     Err(h) => {
                         head = h;
