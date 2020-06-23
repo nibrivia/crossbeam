@@ -8,14 +8,16 @@
 //!   - Simplified BSD License and Apache License, Version 2.0
 //!   - http://www.1024cores.net/home/code-license
 
-use std::cell::UnsafeCell;
-use std::fmt;
-use std::marker::PhantomData;
-use std::mem;
-use std::ptr;
-use std::sync::atomic::{self, AtomicUsize, Ordering};
+use alloc::vec::Vec;
+use core::cell::UnsafeCell;
+use core::fmt;
+use core::marker::PhantomData;
+use core::mem;
+use core::sync::atomic::{self, AtomicUsize, Ordering};
 
 use crossbeam_utils::{Backoff, CachePadded};
+
+use maybe_uninit::MaybeUninit;
 
 use err::{PopError, PushError};
 
@@ -23,12 +25,12 @@ use err::{PopError, PushError};
 struct Slot<T> {
     /// The current stamp.
     ///
-    /// If the stamp equals the tail, this node will be next written to. If it equals the head,
+    /// If the stamp equals the tail, this node will be next written to. If it equals head + 1,
     /// this node will be next read from.
     stamp: AtomicUsize,
 
     /// The value in this slot.
-    value: UnsafeCell<T>,
+    value: UnsafeCell<MaybeUninit<T>>,
 }
 
 /// A bounded multi-producer multi-consumer queue.
@@ -107,22 +109,22 @@ impl<T> ArrayQueue<T> {
         let head = 0;
         let tail = 0;
 
-        // Allocate a buffer of `cap` slots.
+        // Allocate a buffer of `cap` slots initialized
+        // with stamps.
         let buffer = {
-            let mut v = Vec::<Slot<T>>::with_capacity(cap);
+            let mut v: Vec<Slot<T>> = (0..cap)
+                .map(|i| {
+                    // Set the stamp to `{ lap: 0, index: i }`.
+                    Slot {
+                        stamp: AtomicUsize::new(i),
+                        value: UnsafeCell::new(MaybeUninit::uninit()),
+                    }
+                })
+                .collect();
             let ptr = v.as_mut_ptr();
             mem::forget(v);
             ptr
         };
-
-        // Initialize stamps in the slots.
-        for i in 0..cap {
-            unsafe {
-                // Set the stamp to `{ lap: 0, index: i }`.
-                let slot = buffer.add(i);
-                ptr::write(&mut (*slot).stamp, AtomicUsize::new(i));
-            }
-        }
 
         // One lap is the smallest power of two greater than `cap`.
         let one_lap = (cap + 1).next_power_of_two();
@@ -186,7 +188,7 @@ impl<T> ArrayQueue<T> {
                     Ok(_) => {
                         // Write the value into the slot and update the stamp.
                         unsafe {
-                            slot.value.get().write(value);
+                            slot.value.get().write(MaybeUninit::new(value));
                         }
                         slot.stamp.store(tail + 1, Ordering::Release);
                         return Ok(());
@@ -265,7 +267,7 @@ impl<T> ArrayQueue<T> {
                 ) {
                     Ok(_) => {
                         // Read the value from the slot and update the stamp.
-                        let value = unsafe { slot.value.get().read() };
+                        let msg = unsafe { slot.value.get().read().assume_init() };
                         slot.stamp
                             .store(head.wrapping_add(self.one_lap), Ordering::Release);
                         return Ok(value);
@@ -414,7 +416,12 @@ impl<T> Drop for ArrayQueue<T> {
             };
 
             unsafe {
-                self.buffer.add(index).drop_in_place();
+                let p = {
+                    let slot = &mut *self.buffer.add(index);
+                    let value = &mut *slot.value.get();
+                    value.as_mut_ptr()
+                };
+                p.drop_in_place();
             }
         }
 

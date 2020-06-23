@@ -22,6 +22,8 @@ use std::time::Instant;
 
 use crossbeam_utils::{Backoff, CachePadded};
 
+use maybe_uninit::MaybeUninit;
+
 use context::Context;
 use err::{RecvTimeoutError, SendTimeoutError, TryRecvError, TrySendError};
 use select::{Operation, SelectHandle, Selected, Token};
@@ -33,10 +35,11 @@ struct Slot<T> {
     stamp: AtomicUsize,
 
     /// The message in this slot.
-    msg: UnsafeCell<T>,
+    msg: UnsafeCell<MaybeUninit<T>>,
 }
 
 /// The token type for the array flavor.
+#[derive(Debug)]
 pub struct ArrayToken {
     /// Slot to read from or write to.
     slot: *const u8,
@@ -111,22 +114,22 @@ impl<T> Channel<T> {
         // Tail is initialized to `{ lap: 0, mark: 0, index: 0 }`.
         let tail = 0;
 
-        // Allocate a buffer of `cap` slots.
+        // Allocate a buffer of `cap` slots initialized
+        // with stamps.
         let buffer = {
-            let mut v = Vec::<Slot<T>>::with_capacity(cap);
+            let mut v: Vec<Slot<T>> = (0..cap)
+                .map(|i| {
+                    // Set the stamp to `{ lap: 0, mark: 0, index: i }`.
+                    Slot {
+                        stamp: AtomicUsize::new(i),
+                        msg: UnsafeCell::new(MaybeUninit::uninit()),
+                    }
+                })
+                .collect();
             let ptr = v.as_mut_ptr();
             mem::forget(v);
             ptr
         };
-
-        // Initialize stamps in the slots.
-        for i in 0..cap {
-            unsafe {
-                // Set the stamp to `{ lap: 0, mark: 0, index: i }`.
-                let slot = buffer.add(i);
-                ptr::write(&mut (*slot).stamp, AtomicUsize::new(i));
-            }
-        }
 
         Channel {
             buffer,
@@ -232,7 +235,7 @@ impl<T> Channel<T> {
         let slot: &Slot<T> = &*(token.array.slot as *const Slot<T>);
 
         // Write the message into the slot and update the stamp.
-        slot.msg.get().write(msg);
+        slot.msg.get().write(MaybeUninit::new(msg));
         slot.stamp.store(token.array.stamp, Ordering::Release);
 
         // Wake a sleeping receiver.
@@ -322,7 +325,7 @@ impl<T> Channel<T> {
         let slot: &Slot<T> = &*(token.array.slot as *const Slot<T>);
 
         // Read the message from the slot and update the stamp.
-        let msg = slot.msg.get().read();
+        let msg = slot.msg.get().read().assume_init();
         slot.stamp.store(token.array.stamp, Ordering::Release);
 
         // Wake a sleeping sender.
@@ -359,6 +362,12 @@ impl<T> Channel<T> {
                 }
             }
 
+            if let Some(d) = deadline {
+                if Instant::now() >= d {
+                    return Err(SendTimeoutError::Timeout(msg));
+                }
+            }
+
             Context::with(|cx| {
                 // Prepare for blocking until a receiver wakes us up.
                 let oper = Operation::hook(token);
@@ -380,12 +389,6 @@ impl<T> Channel<T> {
                     Selected::Operation(_) => {}
                 }
             });
-
-            if let Some(d) = deadline {
-                if Instant::now() >= d {
-                    return Err(SendTimeoutError::Timeout(msg));
-                }
-            }
         }
     }
 
@@ -419,6 +422,12 @@ impl<T> Channel<T> {
                 }
             }
 
+            if let Some(d) = deadline {
+                if Instant::now() >= d {
+                    return Err(RecvTimeoutError::Timeout);
+                }
+            }
+
             Context::with(|cx| {
                 // Prepare for blocking until a sender wakes us up.
                 let oper = Operation::hook(token);
@@ -442,12 +451,6 @@ impl<T> Channel<T> {
                     Selected::Operation(_) => {}
                 }
             });
-
-            if let Some(d) = deadline {
-                if Instant::now() >= d {
-                    return Err(RecvTimeoutError::Timeout);
-                }
-            }
         }
     }
 
@@ -541,7 +544,12 @@ impl<T> Drop for Channel<T> {
             };
 
             unsafe {
-                self.buffer.add(index).drop_in_place();
+                let p = {
+                    let slot = &mut *self.buffer.add(index);
+                    let msg = &mut *slot.msg.get();
+                    msg.as_mut_ptr()
+                };
+                p.drop_in_place();
             }
         }
 

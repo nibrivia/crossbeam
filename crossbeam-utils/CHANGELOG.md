@@ -1,3 +1,27 @@
+# Version 0.7.2
+
+- Fix bug in release (yanking 0.7.1)
+
+# Version 0.7.1
+
+- Bump `autocfg` dependency to version 1.0. (#460)
+- Make `AtomicCell` lockfree for u8, u16, u32, u64 sized values at 1.34+. (#454)
+
+# Version 0.7.0
+
+- Bump the minimum required version to 1.28.
+- Fix breakage with nightly feature due to rust-lang/rust#65214.
+- Apply `#[repr(transparent)]` to `AtomicCell`.
+- Make `AtomicCell::new()` const function at 1.31+.
+
+# Version 0.6.6
+
+- Add `UnwindSafe` and `RefUnwindSafe` impls for `AtomicCell`.
+- Add `AtomicCell::as_ptr()`.
+- Add `AtomicCell::take()`.
+- Fix a bug in `AtomicCell::compare_exchange()` and `AtomicCell::compare_and_swap()`.
+- Various documentation improvements.
+
 # Version 0.6.5
 
 - Rename `Backoff::is_complete()` to `Backoff::is_completed()`.
@@ -22,7 +46,7 @@
 
 - Fix a soundness bug in `Scope::spawn()`.
 - Remove the `T: 'scope` bound on `ScopedJoinHandle`.
- 
+
 # Version 0.6.0
 
 - Move `AtomicConsume` to `atomic` module.

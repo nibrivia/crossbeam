@@ -1,11 +1,13 @@
-use std::cell::UnsafeCell;
-use std::fmt;
-use std::marker::PhantomData;
-use std::mem::{self, ManuallyDrop};
-use std::ptr;
-use std::sync::atomic::{self, AtomicPtr, AtomicUsize, Ordering};
+use alloc::boxed::Box;
+use core::cell::UnsafeCell;
+use core::fmt;
+use core::marker::PhantomData;
+use core::ptr;
+use core::sync::atomic::{self, AtomicPtr, AtomicUsize, Ordering};
 
 use crossbeam_utils::{Backoff, CachePadded};
+
+use maybe_uninit::MaybeUninit;
 
 use err::PopError;
 
@@ -29,7 +31,7 @@ const HAS_NEXT: usize = 1;
 /// A slot in a block.
 struct Slot<T> {
     /// The value.
-    value: UnsafeCell<ManuallyDrop<T>>,
+    value: UnsafeCell<MaybeUninit<T>>,
 
     /// The state of the slot.
     state: AtomicUsize,
@@ -59,7 +61,13 @@ struct Block<T> {
 impl<T> Block<T> {
     /// Creates an empty block that starts at `start_index`.
     fn new() -> Block<T> {
-        unsafe { mem::zeroed() }
+        // SAFETY: This is safe because:
+        //  [1] `Block::next` (AtomicPtr) may be safely zero initialized.
+        //  [2] `Block::slots` (Array) may be safely zero initialized because of [3, 4].
+        //  [3] `Slot::value` (UnsafeCell) may be safely zero initialized because it
+        //       holds a MaybeUninit.
+        //  [4] `Slot::state` (AtomicUsize) may be safely zero initialized.
+        unsafe { MaybeUninit::zeroed().assume_init() }
     }
 
     /// Waits until the next pointer is set.
@@ -243,7 +251,7 @@ impl<T> SegQueue<T> {
 
                     // Write the value into the slot.
                     let slot = (*block).slots.get_unchecked(offset);
-                    slot.value.get().write(ManuallyDrop::new(value));
+                    slot.value.get().write(MaybeUninit::new(value));
                     slot.state.fetch_or(WRITE, Ordering::Release);
 
                     return;
@@ -338,8 +346,7 @@ impl<T> SegQueue<T> {
                     // Read the value.
                     let slot = (*block).slots.get_unchecked(offset);
                     slot.wait_write();
-                    let m = slot.value.get().read();
-                    let value = ManuallyDrop::into_inner(m);
+                    let value = slot.value.get().read().assume_init();
 
                     // Destroy the block if we've reached the end, or if another thread wanted to
                     // destroy but couldn't because we were busy reading from the slot.
@@ -407,6 +414,14 @@ impl<T> SegQueue<T> {
                 tail &= !((1 << SHIFT) - 1);
                 head &= !((1 << SHIFT) - 1);
 
+                // Fix up indices if they fall onto block ends.
+                if (tail >> SHIFT) & (LAP - 1) == LAP - 1 {
+                    tail = tail.wrapping_add(1 << SHIFT);
+                }
+                if (head >> SHIFT) & (LAP - 1) == LAP - 1 {
+                    head = head.wrapping_add(1 << SHIFT);
+                }
+
                 // Rotate indices so that head falls into the first block.
                 let lap = (head >> SHIFT) / LAP;
                 tail = tail.wrapping_sub((lap * LAP) << SHIFT);
@@ -415,15 +430,6 @@ impl<T> SegQueue<T> {
                 // Remove the lower bits.
                 tail >>= SHIFT;
                 head >>= SHIFT;
-
-                // Fix up indices if they fall onto block ends.
-                if head == BLOCK_CAP {
-                    head = 0;
-                    tail -= LAP;
-                }
-                if tail == BLOCK_CAP {
-                    tail += 1;
-                }
 
                 // Return the difference minus the number of blocks between tail and head.
                 return tail - head - tail / LAP;
@@ -450,7 +456,8 @@ impl<T> Drop for SegQueue<T> {
                 if offset < BLOCK_CAP {
                     // Drop the value in the slot.
                     let slot = (*block).slots.get_unchecked(offset);
-                    ManuallyDrop::drop(&mut *(*slot).value.get());
+                    let p = &mut *slot.value.get();
+                    p.as_mut_ptr().drop_in_place();
                 } else {
                     // Deallocate the block and move to the next one.
                     let next = (*block).next.load(Ordering::Relaxed);

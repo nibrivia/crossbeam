@@ -47,7 +47,6 @@
 #![warn(missing_docs)]
 #![warn(missing_debug_implementations)]
 #![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(feature = "nightly", feature(alloc))]
 #![cfg_attr(feature = "nightly", feature(cfg_target_has_atomic))]
 
 #[macro_use]
@@ -56,13 +55,10 @@ extern crate cfg_if;
 extern crate core;
 
 cfg_if! {
-    if #[cfg(feature = "nightly")] {
+    if #[cfg(feature = "alloc")] {
         extern crate alloc;
-    } else {
-        mod alloc {
-            extern crate std;
-            pub use self::std::*;
-        }
+    } else if #[cfg(feature = "std")] {
+        extern crate std as alloc;
     }
 }
 
@@ -74,12 +70,23 @@ pub use _epoch::crossbeam_epoch as epoch;
 
 extern crate crossbeam_utils;
 
+#[cfg_attr(feature = "nightly", cfg(target_has_atomic = "ptr"))]
 pub use crossbeam_utils::atomic;
 
 /// Miscellaneous utilities.
 pub mod utils {
     pub use crossbeam_utils::Backoff;
     pub use crossbeam_utils::CachePadded;
+}
+
+cfg_if! {
+    if #[cfg(any(feature = "std", feature = "alloc"))] {
+        mod _queue {
+            pub extern crate crossbeam_queue;
+        }
+        #[doc(inline)]
+        pub use _queue::crossbeam_queue as queue;
+    }
 }
 
 cfg_if! {
@@ -100,12 +107,6 @@ cfg_if! {
         // HACK(stjepang): This is the only way to reexport `select!` in Rust older than 1.30.0
         #[doc(hidden)]
         pub use _channel::*;
-
-        mod _queue {
-            pub extern crate crossbeam_queue;
-        }
-        #[doc(inline)]
-        pub use _queue::crossbeam_queue as queue;
 
         pub use crossbeam_utils::sync;
         pub use crossbeam_utils::thread;

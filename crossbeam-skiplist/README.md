@@ -10,10 +10,11 @@ https://crates.io/crates/crossbeam-skiplist)
 https://docs.rs/crossbeam-skiplist)
 [![Rust 1.28+](https://img.shields.io/badge/rust-1.28+-lightgray.svg)](
 https://www.rust-lang.org)
+[![chat](https://img.shields.io/discord/569610676205781012.svg?logo=discord)](https://discord.gg/BBYwKq)
 
 **Note:** This crate is still a work in progress.
 
-This crate can be used in `no_std` + `alloc` environments.
+This crate can be used in `no_std` environments that implement `alloc`. The `alloc` feature of this crate needs to be enabled in `no_std` environments.
 
 <!--
 ## Usage
@@ -31,6 +32,10 @@ Next, add this to your crate:
 extern crate crossbeam_skiplist;
 ```
 -->
+
+## Compatibility
+
+The minimum supported Rust version is 1.28. Any change to this is considered a breaking change.
 
 ## License
 

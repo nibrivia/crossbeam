@@ -1,7 +1,5 @@
 extern crate crossbeam;
 
-use std::sync::mpsc;
-
 mod message;
 
 const MESSAGES: usize = 5_000_000;
@@ -42,8 +40,8 @@ pub fn shuffle<T>(v: &mut [T]) {
     });
 }
 
-fn seq_async() {
-    let (tx, rx) = mpsc::channel();
+fn seq_unbounded() {
+    let (tx, rx) = flume::unbounded();
 
     for i in 0..MESSAGES {
         tx.send(message::new(i)).unwrap();
@@ -54,8 +52,8 @@ fn seq_async() {
     }
 }
 
-fn seq_sync(cap: usize) {
-    let (tx, rx) = mpsc::sync_channel(cap);
+fn seq_bounded(cap: usize) {
+    let (tx, rx) = flume::bounded(cap);
 
     for i in 0..MESSAGES {
         tx.send(message::new(i)).unwrap();
@@ -66,8 +64,8 @@ fn seq_sync(cap: usize) {
     }
 }
 
-fn spsc_async() {
-    let (tx, rx) = mpsc::channel();
+fn spsc_unbounded() {
+    let (tx, rx) = flume::unbounded();
 
     crossbeam::scope(|scope| {
         scope.spawn(move |_| {
@@ -83,8 +81,8 @@ fn spsc_async() {
     .unwrap();
 }
 
-fn spsc_sync(cap: usize) {
-    let (tx, rx) = mpsc::sync_channel(cap);
+fn spsc_bounded(cap: usize) {
+    let (tx, rx) = flume::bounded(cap);
 
     crossbeam::scope(|scope| {
         scope.spawn(move |_| {
@@ -100,8 +98,8 @@ fn spsc_sync(cap: usize) {
     .unwrap();
 }
 
-fn mpsc_async() {
-    let (tx, rx) = mpsc::channel();
+fn mpsc_unbounded() {
+    let (tx, rx) = flume::unbounded();
 
     crossbeam::scope(|scope| {
         for _ in 0..THREADS {
@@ -120,8 +118,8 @@ fn mpsc_async() {
     .unwrap();
 }
 
-fn mpsc_sync(cap: usize) {
-    let (tx, rx) = mpsc::sync_channel(cap);
+fn mpsc_bounded(cap: usize) {
+    let (tx, rx) = flume::bounded(cap);
 
     crossbeam::scope(|scope| {
         for _ in 0..THREADS {
@@ -149,23 +147,23 @@ fn main() {
             println!(
                 "{:25} {:15} {:7.3} sec",
                 $name,
-                "Rust mpsc",
+                "Rust flume",
                 elapsed.as_secs() as f64 + elapsed.subsec_nanos() as f64 / 1e9
             );
         };
     }
 
-    run!("bounded0_mpsc", mpsc_sync(0));
-    run!("bounded0_spsc", spsc_sync(0));
+    // run!("bounded0_mpsc", mpsc_bounded(0));
+    // run!("bounded0_spsc", spsc_bounded(0));
 
-    run!("bounded1_mpsc", mpsc_sync(1));
-    run!("bounded1_spsc", spsc_sync(1));
+    run!("bounded1_mpsc", mpsc_bounded(1));
+    run!("bounded1_spsc", spsc_bounded(1));
 
-    run!("bounded_mpsc", mpsc_sync(MESSAGES));
-    run!("bounded_seq", seq_sync(MESSAGES));
-    run!("bounded_spsc", spsc_sync(MESSAGES));
+    run!("bounded_mpsc", mpsc_bounded(MESSAGES));
+    run!("bounded_seq", seq_bounded(MESSAGES));
+    run!("bounded_spsc", spsc_bounded(MESSAGES));
 
-    run!("unbounded_mpsc", mpsc_async());
-    run!("unbounded_seq", seq_async());
-    run!("unbounded_spsc", spsc_async());
+    run!("unbounded_mpsc", mpsc_unbounded());
+    run!("unbounded_seq", seq_unbounded());
+    run!("unbounded_spsc", spsc_unbounded());
 }

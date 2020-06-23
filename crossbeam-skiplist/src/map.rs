@@ -3,7 +3,9 @@
 use std::borrow::Borrow;
 use std::fmt;
 use std::iter::FromIterator;
+use std::mem::ManuallyDrop;
 use std::ops::{Bound, RangeBounds};
+use std::ptr;
 
 use base::{self, try_pin_loop};
 use epoch;
@@ -109,10 +111,7 @@ where
     }
 
     /// Returns an iterator over a subset of entries in the skip list.
-    pub fn range<Q, R>(
-        &self,
-        range: R,
-    ) -> Range<'_, Q, R, K, V>
+    pub fn range<Q, R>(&self, range: R) -> Range<'_, Q, R, K, V>
     where
         K: Borrow<Q>,
         R: RangeBounds<Q>,
@@ -224,12 +223,14 @@ where
 
 /// A reference-counted entry in a map.
 pub struct Entry<'a, K: 'a, V: 'a> {
-    inner: base::RefEntry<'a, K, V>,
+    inner: ManuallyDrop<base::RefEntry<'a, K, V>>,
 }
 
 impl<'a, K, V> Entry<'a, K, V> {
     fn new(inner: base::RefEntry<'a, K, V>) -> Entry<'a, K, V> {
-        Entry { inner }
+        Entry {
+            inner: ManuallyDrop::new(inner),
+        }
     }
 
     /// Returns a reference to the key.
@@ -245,6 +246,14 @@ impl<'a, K, V> Entry<'a, K, V> {
     /// Returns `true` if the entry is removed from the map.
     pub fn is_removed(&self) -> bool {
         self.inner.is_removed()
+    }
+}
+
+impl<'a, K, V> Drop for Entry<'a, K, V> {
+    fn drop(&mut self) {
+        unsafe {
+            ManuallyDrop::into_inner(ptr::read(&mut self.inner)).release_with_pin(epoch::pin);
+        }
     }
 }
 

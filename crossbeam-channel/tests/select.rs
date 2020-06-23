@@ -812,7 +812,7 @@ fn stress_timeout_two_threads() {
                     thread::sleep(ms(500));
                 }
 
-                let mut done = false;
+                let done = false;
                 while !done {
                     let mut sel = Select::new();
                     let oper1 = sel.send(&s);
@@ -947,7 +947,7 @@ fn matching_with_leftover() {
 fn channel_through_channel() {
     const COUNT: usize = 1000;
 
-    type T = Box<Any + Send>;
+    type T = Box<dyn Any + Send>;
 
     for cap in 0..3 {
         let (s, r) = bounded::<T>(cap);
@@ -958,7 +958,7 @@ fn channel_through_channel() {
 
                 for _ in 0..COUNT {
                     let (new_s, new_r) = bounded(cap);
-                    let mut new_r: T = Box::new(Some(new_r));
+                    let new_r: T = Box::new(Some(new_r));
 
                     {
                         let mut sel = Select::new();

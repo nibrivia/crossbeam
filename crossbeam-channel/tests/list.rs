@@ -503,7 +503,7 @@ fn recv_in_send() {
 fn channel_through_channel() {
     const COUNT: usize = 1000;
 
-    type T = Box<Any + Send>;
+    type T = Box<dyn Any + Send>;
 
     let (s, r) = unbounded::<T>();
 
@@ -513,7 +513,7 @@ fn channel_through_channel() {
 
             for _ in 0..COUNT {
                 let (new_s, new_r) = unbounded();
-                let mut new_r: T = Box::new(Some(new_r));
+                let new_r: T = Box::new(Some(new_r));
 
                 s.send(new_r).unwrap();
                 s = new_s;

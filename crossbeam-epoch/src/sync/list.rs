@@ -42,9 +42,8 @@ pub struct Entry {
 ///         &*elem_ptr
 ///     }
 ///
-///     unsafe fn finalize(entry: &Entry) {
-///         let elem = Self::element_of(entry);
-///         drop(Box::from_raw(elem as *const A as *mut A));
+///     unsafe fn finalize(entry: &Entry, guard: &Guard) {
+///         guard.defer_destroy(Shared::from(Self::element_of(entry) as *const _));
 ///     }
 /// }
 /// ```
@@ -78,17 +77,18 @@ pub trait IsElement<T> {
     /// ```
     ///
     /// # Safety
-    /// The caller has to guarantee that the `Entry` it
-    /// is called with was retrieved from an instance of the element type (`T`).
+    ///
+    /// The caller has to guarantee that the `Entry` is called with was retrieved from an instance
+    /// of the element type (`T`).
     unsafe fn element_of(&Entry) -> &T;
 
-    /// Deallocates the whole element given its `Entry`. This is called when the list
-    /// is ready to actually free the element.
+    /// The function that is called when an entry is unlinked from list.
     ///
     /// # Safety
-    /// The caller has to guarantee that the `Entry` it
-    /// is called with was retrieved from an instance of the element type (`T`).
-    unsafe fn finalize(&Entry);
+    ///
+    /// The caller has to guarantee that the `Entry` is called with was retrieved from an instance
+    /// of the element type (`T`).
+    unsafe fn finalize(&Entry, &Guard);
 }
 
 /// A lock-free, intrusive linked list of type `T`.
@@ -166,7 +166,7 @@ impl<T, C: IsElement<T>> List<T, C> {
     /// You should guarantee that:
     ///
     /// - `container` is not null
-    /// - `container` is immovable, e.g. inside a `Box`
+    /// - `container` is immovable, e.g. inside an `Owned`
     /// - the same `Entry` is not inserted more than once
     /// - the inserted object will be removed before the list is dropped
     pub unsafe fn insert<'g>(&'g self, container: Shared<'g, T>, guard: &'g Guard) {
@@ -225,7 +225,7 @@ impl<T, C: IsElement<T>> Drop for List<T, C> {
                 // Verify that all elements have been removed from the list.
                 assert_eq!(succ.tag(), 1);
 
-                C::finalize(curr.deref());
+                C::finalize(curr.deref(), guard);
                 curr = succ;
             }
         }
@@ -243,36 +243,44 @@ impl<'g, T: 'g, C: IsElement<T>> Iterator for Iter<'g, T, C> {
                 // This entry was removed. Try unlinking it from the list.
                 let succ = succ.with_tag(0);
 
-                // The tag should never be zero, because removing a node after a logically deleted
+                // The tag should always be zero, because removing a node after a logically deleted
                 // node leaves the list in an invalid state.
                 debug_assert!(self.curr.tag() == 0);
 
-                match self
+                // Try to unlink `curr` from the list, and get the new value of `self.pred`.
+                let succ = match self
                     .pred
                     .compare_and_set(self.curr, succ, Acquire, self.guard)
                 {
                     Ok(_) => {
-                        // We succeeded in unlinking this element from the list, so we have to
-                        // schedule deallocation. Deferred drop is okay, because `list.delete()`
-                        // can only be called if `T: 'static`.
+                        // We succeeded in unlinking `curr`, so we have to schedule
+                        // deallocation. Deferred drop is okay, because `list.delete()` can only be
+                        // called if `T: 'static`.
                         unsafe {
-                            let p = self.curr;
-                            self.guard.defer_unchecked(move || C::finalize(p.deref()));
+                            C::finalize(self.curr.deref(), self.guard);
                         }
 
-                        // Move over the removed by only advancing `curr`, not `pred`.
-                        self.curr = succ;
-                        continue;
+                        // `succ` is the new value of `self.pred`.
+                        succ
                     }
-                    Err(_) => {
-                        // A concurrent thread modified the predecessor node. Since it might've
-                        // been deleted, we need to restart from `head`.
-                        self.pred = self.head;
-                        self.curr = self.head.load(Acquire, self.guard);
+                    Err(e) => {
+                        // `e.current` is the current value of `self.pred`.
+                        e.current
+                    }
+                };
 
-                        return Some(Err(IterError::Stalled));
-                    }
+                // If the predecessor node is already marked as deleted, we need to restart from
+                // `head`.
+                if succ.tag() != 0 {
+                    self.pred = self.head;
+                    self.curr = self.head.load(Acquire, self.guard);
+
+                    return Some(Err(IterError::Stalled));
                 }
+
+                // Move over the removed by only advancing `curr`, not `pred`.
+                self.curr = succ;
+                continue;
             }
 
             // Move one step forward.
@@ -303,8 +311,8 @@ mod tests {
             entry
         }
 
-        unsafe fn finalize(entry: &Entry) {
-            drop(Box::from_raw(entry as *const Entry as *mut Entry));
+        unsafe fn finalize(entry: &Entry, guard: &Guard) {
+            guard.defer_destroy(Shared::from(Self::element_of(entry) as *const _));
         }
     }
 

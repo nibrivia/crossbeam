@@ -9,7 +9,7 @@ cargo check --no-default-features
 cargo check --bins --examples --tests
 cargo test
 
-if [[ "$TRAVIS_RUST_VERSION" == "nightly" ]]; then
+if [[ "$RUST_VERSION" == "nightly" ]]; then
     cargo check --no-default-features --features nightly
     cargo test --features nightly
 
@@ -20,4 +20,11 @@ if [[ "$TRAVIS_RUST_VERSION" == "nightly" ]]; then
         --target x86_64-unknown-linux-gnu \
         --features sanitize,nightly \
         --example sanitize
+
+    # Check for no_std environment.
+    cargo check --target thumbv7m-none-eabi --no-default-features
+    cargo check --target thumbv7m-none-eabi --no-default-features --features alloc
+    cargo check --target thumbv7m-none-eabi --no-default-features --features alloc,nightly
+    cargo check --target thumbv6m-none-eabi --no-default-features --features nightly
+    cargo check --target thumbv6m-none-eabi --no-default-features --features alloc,nightly
 fi

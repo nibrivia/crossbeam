@@ -92,18 +92,22 @@
 extern crate crossbeam_epoch as epoch;
 extern crate crossbeam_utils as utils;
 
+extern crate maybe_uninit;
+
 use std::cell::{Cell, UnsafeCell};
 use std::cmp;
 use std::fmt;
 use std::iter::FromIterator;
 use std::marker::PhantomData;
-use std::mem::{self, ManuallyDrop};
+use std::mem;
 use std::ptr;
 use std::sync::atomic::{self, AtomicIsize, AtomicPtr, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use epoch::{Atomic, Owned};
 use utils::{Backoff, CachePadded};
+
+use maybe_uninit::MaybeUninit;
 
 // Minimum buffer capacity.
 const MIN_CAP: usize = 64;
@@ -218,7 +222,7 @@ impl<T> Drop for Inner<T> {
             // Go through the buffer from front to back and drop all tasks in the queue.
             let mut i = f;
             while i != b {
-                ptr::drop_in_place(buffer.deref().at(i));
+                buffer.deref().at(i).drop_in_place();
                 i = i.wrapping_add(1);
             }
 
@@ -448,6 +452,25 @@ impl<T> Worker<T> {
         let b = self.inner.back.load(Ordering::Relaxed);
         let f = self.inner.front.load(Ordering::SeqCst);
         b.wrapping_sub(f) <= 0
+    }
+
+    /// Returns the number of tasks in the deque.
+    ///
+    /// ```
+    /// use crossbeam_deque::Worker;
+    ///
+    /// let w = Worker::new_lifo();
+    ///
+    /// assert_eq!(w.len(), 0);
+    /// w.push(1);
+    /// assert_eq!(w.len(), 1);
+    /// w.push(1);
+    /// assert_eq!(w.len(), 2);
+    /// ```
+    pub fn len(&self) -> usize {
+        let b = self.inner.back.load(Ordering::Relaxed);
+        let f = self.inner.front.load(Ordering::SeqCst);
+        b.wrapping_sub(f).max(0) as usize
     }
 
     /// Pushes a task into the queue.
@@ -745,6 +768,14 @@ impl<T> Stealer<T> {
     /// assert_eq!(w2.pop(), Some(2));
     /// ```
     pub fn steal_batch(&self, dest: &Worker<T>) -> Steal<()> {
+        if Arc::ptr_eq(&self.inner, &dest.inner) {
+            if dest.is_empty() {
+                return Steal::Empty;
+            } else {
+                return Steal::Success(());
+            }
+        }
+
         // Load the front index.
         let mut f = self.inner.front.load(Ordering::Acquire);
 
@@ -922,6 +953,13 @@ impl<T> Stealer<T> {
     /// assert_eq!(w2.pop(), Some(2));
     /// ```
     pub fn steal_batch_and_pop(&self, dest: &Worker<T>) -> Steal<T> {
+        if Arc::ptr_eq(&self.inner, &dest.inner) {
+            match dest.pop() {
+                None => return Steal::Empty,
+                Some(task) => return Steal::Success(task),
+            }
+        }
+
         // Load the front index.
         let mut f = self.inner.front.load(Ordering::Acquire);
 
@@ -1125,7 +1163,7 @@ const HAS_NEXT: usize = 1;
 /// A slot in a block.
 struct Slot<T> {
     /// The task.
-    task: UnsafeCell<ManuallyDrop<T>>,
+    task: UnsafeCell<MaybeUninit<T>>,
 
     /// The state of the slot.
     state: AtomicUsize,
@@ -1155,7 +1193,13 @@ struct Block<T> {
 impl<T> Block<T> {
     /// Creates an empty block that starts at `start_index`.
     fn new() -> Block<T> {
-        unsafe { mem::zeroed() }
+        // SAFETY: This is safe because:
+        //  [1] `Block::next` (AtomicPtr) may be safely zero initialized.
+        //  [2] `Block::slots` (Array) may be safely zero initialized because of [3, 4].
+        //  [3] `Slot::task` (UnsafeCell) may be safely zero initialized because it
+        //       holds a MaybeUninit.
+        //  [4] `Slot::state` (AtomicUsize) may be safely zero initialized.
+        unsafe { MaybeUninit::zeroed().assume_init() }
     }
 
     /// Waits until the next pointer is set.
@@ -1314,7 +1358,7 @@ impl<T> Injector<T> {
 
                     // Write the task into the slot.
                     let slot = (*block).slots.get_unchecked(offset);
-                    slot.task.get().write(ManuallyDrop::new(task));
+                    slot.task.get().write(MaybeUninit::new(task));
                     slot.state.fetch_or(WRITE, Ordering::Release);
 
                     return;
@@ -1407,8 +1451,7 @@ impl<T> Injector<T> {
             // Read the task.
             let slot = (*block).slots.get_unchecked(offset);
             slot.wait_write();
-            let m = slot.task.get().read();
-            let task = ManuallyDrop::into_inner(m);
+            let task = slot.task.get().read().assume_init();
 
             // Destroy the block if we've reached the end, or if another thread wanted to destroy
             // but couldn't because we were busy reading from the slot.
@@ -1533,8 +1576,7 @@ impl<T> Injector<T> {
                         // Read the task.
                         let slot = (*block).slots.get_unchecked(offset + i);
                         slot.wait_write();
-                        let m = slot.task.get().read();
-                        let task = ManuallyDrop::into_inner(m);
+                        let task = slot.task.get().read().assume_init();
 
                         // Write it into the destination queue.
                         dest_buffer.write(dest_b.wrapping_add(i as isize), task);
@@ -1546,8 +1588,7 @@ impl<T> Injector<T> {
                         // Read the task.
                         let slot = (*block).slots.get_unchecked(offset + i);
                         slot.wait_write();
-                        let m = slot.task.get().read();
-                        let task = ManuallyDrop::into_inner(m);
+                        let task = slot.task.get().read().assume_init();
 
                         // Write it into the destination queue.
                         dest_buffer.write(dest_b.wrapping_add((batch_size - 1 - i) as isize), task);
@@ -1689,8 +1730,7 @@ impl<T> Injector<T> {
             // Read the task.
             let slot = (*block).slots.get_unchecked(offset);
             slot.wait_write();
-            let m = slot.task.get().read();
-            let task = ManuallyDrop::into_inner(m);
+            let task = slot.task.get().read().assume_init();
 
             match dest.flavor {
                 Flavor::Fifo => {
@@ -1699,8 +1739,7 @@ impl<T> Injector<T> {
                         // Read the task.
                         let slot = (*block).slots.get_unchecked(offset + i + 1);
                         slot.wait_write();
-                        let m = slot.task.get().read();
-                        let task = ManuallyDrop::into_inner(m);
+                        let task = slot.task.get().read().assume_init();
 
                         // Write it into the destination queue.
                         dest_buffer.write(dest_b.wrapping_add(i as isize), task);
@@ -1713,8 +1752,7 @@ impl<T> Injector<T> {
                         // Read the task.
                         let slot = (*block).slots.get_unchecked(offset + i + 1);
                         slot.wait_write();
-                        let m = slot.task.get().read();
-                        let task = ManuallyDrop::into_inner(m);
+                        let task = slot.task.get().read().assume_init();
 
                         // Write it into the destination queue.
                         dest_buffer.write(dest_b.wrapping_add((batch_size - 1 - i) as isize), task);
@@ -1769,6 +1807,56 @@ impl<T> Injector<T> {
         let tail = self.tail.index.load(Ordering::SeqCst);
         head >> SHIFT == tail >> SHIFT
     }
+
+    /// Returns the number of tasks in the queue.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use crossbeam_deque::Injector;
+    ///
+    /// let q = Injector::new();
+    ///
+    /// assert_eq!(q.len(), 0);
+    /// q.push(1);
+    /// assert_eq!(q.len(), 1);
+    /// q.push(1);
+    /// assert_eq!(q.len(), 2);
+    /// ```
+    pub fn len(&self) -> usize {
+        loop {
+            // Load the tail index, then load the head index.
+            let mut tail = self.tail.index.load(Ordering::SeqCst);
+            let mut head = self.head.index.load(Ordering::SeqCst);
+
+            // If the tail index didn't change, we've got consistent indices to work with.
+            if self.tail.index.load(Ordering::SeqCst) == tail {
+                // Erase the lower bits.
+                tail &= !((1 << SHIFT) - 1);
+                head &= !((1 << SHIFT) - 1);
+
+                // Fix up indices if they fall onto block ends.
+                if (tail >> SHIFT) & (LAP - 1) == LAP - 1 {
+                    tail = tail.wrapping_add(1 << SHIFT);
+                }
+                if (head >> SHIFT) & (LAP - 1) == LAP - 1 {
+                    head = head.wrapping_add(1 << SHIFT);
+                }
+
+                // Rotate indices so that head falls into the first block.
+                let lap = (head >> SHIFT) / LAP;
+                tail = tail.wrapping_sub((lap * LAP) << SHIFT);
+                head = head.wrapping_sub((lap * LAP) << SHIFT);
+
+                // Remove the lower bits.
+                tail >>= SHIFT;
+                head >>= SHIFT;
+
+                // Return the difference minus the number of blocks between tail and head.
+                return tail - head - tail / LAP;
+            }
+        }
+    }
 }
 
 impl<T> Drop for Injector<T> {
@@ -1789,7 +1877,8 @@ impl<T> Drop for Injector<T> {
                 if offset < BLOCK_CAP {
                     // Drop the task in the slot.
                     let slot = (*block).slots.get_unchecked(offset);
-                    ManuallyDrop::drop(&mut *(*slot).task.get());
+                    let p = &mut *slot.task.get();
+                    p.as_mut_ptr().drop_in_place();
                 } else {
                     // Deallocate the block and move to the next one.
                     let next = (*block).next.load(Ordering::Relaxed);

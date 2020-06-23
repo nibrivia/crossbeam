@@ -4,7 +4,7 @@ name = "crossbeam"
 # - Update CHANGELOG.md
 # - Update README.md
 # - Create "crossbeam-X.Y.Z" git tag
-version = "0.7.1"
+version = "0.7.3"
 authors = ["The Crossbeam Project Developers"]
 license = "MIT/Apache-2.0"
 readme = "README.md"
@@ -21,31 +21,44 @@ travis-ci = { repository = "crossbeam-rs/crossbeam" }
 
 [features]
 default = ["std"]
-nightly = ["crossbeam-epoch/nightly", "crossbeam-utils/nightly"]
-std = ["crossbeam-epoch/std", "crossbeam-utils/std"]
+nightly = ["crossbeam-epoch/nightly", "crossbeam-utils/nightly", "crossbeam-queue/nightly"]
+std = [
+  "crossbeam-channel",
+  "crossbeam-deque",
+  "crossbeam-epoch/std",
+  "crossbeam-queue/std",
+  "crossbeam-utils/std",
+]
+alloc = ["crossbeam-epoch/alloc", "crossbeam-utils/alloc", "crossbeam-queue/alloc"]
 
 [dependencies]
-cfg-if = "0.1"
+cfg-if = "0.1.2"
 
 [dependencies.crossbeam-channel]
-version = "0.3.7"
+version = "0.4"
 path = "./crossbeam-channel"
+optional = true
 
 [dependencies.crossbeam-deque]
 version = "0.7.0"
 path = "./crossbeam-deque"
+optional = true
 
 [dependencies.crossbeam-epoch]
-version = "0.7.1"
+version = "0.8"
 path = "./crossbeam-epoch"
+default-features = false
 
 [dependencies.crossbeam-queue]
-version = "0.1.0"
+version = "0.2"
 path = "./crossbeam-queue"
+default-features = false
+optional = true
 
 [dependencies.crossbeam-utils]
-version = "0.6.5"
+version = "0.7"
 path = "./crossbeam-utils"
+default-features = false
 
 [dev-dependencies]
 rand = "0.6"

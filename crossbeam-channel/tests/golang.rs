@@ -314,6 +314,33 @@ mod fifo {
     }
 }
 
+// https://github.com/golang/go/blob/master/test/chan/goroutines.go
+mod goroutines {
+    use super::*;
+
+    fn f(left: Chan<i32>, right: Chan<i32>) {
+        left.send(right.recv().unwrap());
+    }
+
+    #[test]
+    fn main() {
+        let n = 100i32;
+
+        let leftmost = make::<i32>(0);
+        let mut right = leftmost.clone();
+        let mut left = leftmost.clone();
+
+        for _ in 0..n {
+            right = make::<i32>(0);
+            go!(left, right, f(left, right));
+            left = right.clone();
+        }
+
+        go!(right, right.send(1));
+        leftmost.recv().unwrap();
+    }
+}
+
 // https://github.com/golang/go/blob/master/test/chan/nonblock.go
 mod nonblock {
     use super::*;
@@ -688,12 +715,117 @@ mod select6 {
 
 // https://github.com/golang/go/blob/master/test/chan/select7.go
 mod select7 {
-    // TODO
+    use super::*;
+
+    fn recv1(c: Chan<i32>) {
+        c.recv().unwrap();
+    }
+
+    fn recv2(c: Chan<i32>) {
+        select! {
+            recv(c.rx()) -> _ => ()
+        }
+    }
+
+    fn recv3(c: Chan<i32>) {
+        let c2 = make::<i32>(1);
+        select! {
+            recv(c.rx()) -> _ => (),
+            recv(c2.rx()) -> _ => ()
+        }
+    }
+
+    fn send1(recv: fn(Chan<i32>)) {
+        let c = make::<i32>(1);
+        go!(c, recv(c));
+        thread::yield_now();
+        c.send(1);
+    }
+
+    fn send2(recv: fn(Chan<i32>)) {
+        let c = make::<i32>(1);
+        go!(c, recv(c));
+        thread::yield_now();
+        select! {
+            send(c.tx(), 1) -> _ => ()
+        }
+    }
+
+    fn send3(recv: fn(Chan<i32>)) {
+        let c = make::<i32>(1);
+        go!(c, recv(c));
+        thread::yield_now();
+        let c2 = make::<i32>(1);
+        select! {
+            send(c.tx(), 1) -> _ => (),
+            send(c2.tx(), 1) -> _ => ()
+        }
+    }
+
+    #[test]
+    fn main() {
+        send1(recv1);
+        send2(recv1);
+        send3(recv1);
+        send1(recv2);
+        send2(recv2);
+        send3(recv2);
+        send1(recv3);
+        send2(recv3);
+        send3(recv3);
+    }
 }
 
 // https://github.com/golang/go/blob/master/test/chan/sieve1.go
 mod sieve1 {
-    // TODO
+    use super::*;
+
+    fn generate(ch: Chan<i32>) {
+        let mut i = 2;
+        loop {
+            ch.send(i);
+            i += 1;
+        }
+    }
+
+    fn filter(in_ch: Chan<i32>, out_ch: Chan<i32>, prime: i32) {
+        for i in in_ch {
+            if i % prime != 0 {
+                out_ch.send(i);
+            }
+        }
+    }
+
+    fn sieve(primes: Chan<i32>) {
+        let mut ch = make::<i32>(1);
+        go!(ch, generate(ch));
+        loop {
+            let prime = ch.recv().unwrap();
+            primes.send(prime);
+
+            let ch1 = make::<i32>(1);
+            go!(ch, ch1, prime, filter(ch, ch1, prime));
+            ch = ch1;
+        }
+    }
+
+    #[test]
+    fn main() {
+        let primes = make::<i32>(1);
+        go!(primes, sieve(primes));
+
+        let a = [
+            2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83,
+            89, 97,
+        ];
+        for item in a.iter() {
+            let x = primes.recv().unwrap();
+            if x != *item {
+                println!("{} != {}", x, item);
+                panic!("fail");
+            }
+        }
+    }
 }
 
 // https://github.com/golang/go/blob/master/test/chan/zerosize.go
@@ -814,14 +946,14 @@ mod chan_test {
 
                 go!(c, done, {
                     let v = c.try_recv();
-                    done.send(v.is_some());
+                    done.send(v.is_none());
                 });
 
                 thread::sleep(ms(1));
                 c.close();
 
                 if !done.recv().unwrap() {
-                    // panic!();
+                    panic!();
                 }
             }
 
@@ -1157,7 +1289,7 @@ mod chan_test {
     fn test_chan_send_interface() {
         struct Mt;
 
-        let c = make::<Box<Any>>(1);
+        let c = make::<Box<dyn Any>>(1);
         c.send(Box::new(Mt));
 
         select! {
