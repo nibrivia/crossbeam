@@ -20,9 +20,11 @@ use std::cell::Cell;
 use std::fmt;
 use std::marker::PhantomData;
 use std::mem;
+use std::thread;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
+//use crossbeam_utils::Backoff;
 use crossbeam_utils::CachePadded;
 
 use err::{PopError, PushError};
@@ -436,11 +438,24 @@ impl<T> Consumer<T> {
         self.len() == self.inner.cap
     }
 
+    /// waits until queue can be popped
     pub fn wait(&self) {
         let head = self.head.get();
         let mut tail = self.inner.tail.load(Ordering::Acquire);
-        while head == tail {
+
+        // we're good, stop
+        if head != tail {
+            self.tail.set(tail);
+            return;
+        }
+
+        // we need to wait
+        loop {
+            thread::yield_now();
             tail = self.inner.tail.load(Ordering::Acquire);
+            if head != tail {
+                break;
+            }
         }
         self.tail.set(tail);
     }

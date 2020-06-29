@@ -169,13 +169,11 @@ where
         let mut handles = scope.handles.lock().unwrap();
 
         // Filter handles that haven't been joined, join them, and collect errors.
-        let panics = handles
+        handles
             .drain(..)
             .filter_map(|handle| handle.lock().unwrap().take())
             .filter_map(|handle| handle.join().err())
-            .collect();
-
-        panics
+            .collect()
     };
 
     // If `f` has panicked, resume unwinding.
