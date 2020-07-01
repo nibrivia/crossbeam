@@ -20,9 +20,9 @@ use std::cell::Cell;
 use std::fmt;
 use std::marker::PhantomData;
 use std::mem;
-use std::thread;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+//use std::thread;
 
 //use crossbeam_utils::Backoff;
 use crossbeam_utils::CachePadded;
@@ -451,7 +451,7 @@ impl<T> Consumer<T> {
 
         // we need to wait
         loop {
-            thread::yield_now();
+            //thread::yield_now();
             tail = self.inner.tail.load(Ordering::Acquire);
             if head != tail {
                 break;
