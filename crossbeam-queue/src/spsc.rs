@@ -418,7 +418,7 @@ impl<T> Consumer<T> {
     /// assert!(!c.is_empty());
     /// ```
     pub fn is_empty(&self) -> bool {
-        self.len() == 0
+        !(self.head != self.tail || self.len() != 0)
     }
 
     /// Returns `true` if the queue is full.
